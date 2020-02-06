@@ -62,10 +62,9 @@ process shovill {
   tag "$name"
   publishDir "${params.outdir}/assembled", mode: 'copy',saveAs: {filename -> filename == "contigs.fa" ? "${name}.contigs.fasta" : "$filename"}
 
-  attempts = {task.attempt}
   //start with a lot of ram and scale down if we fail
-  ram = 36 - 4 * attempts
-  memory { ram }
+  memory { 36 - 4 * task.attempt }
+  ram = memory()
   errorStrategy { ram > 0 ? 'retry' : 'terminate' }
 
   input:
