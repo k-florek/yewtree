@@ -41,8 +41,8 @@ process seqyclean {
   set val(name), file(reads) from read_files_trimming
 
   output:
-  tuple val(name), file("*_{PE1,PE2}.fastq.gz") into trimmed_reads
-  file "*_SummaryStatistics.txt" seqyclean_report
+  tuple name, file("${name}_{PE1,PE2}.fastq.gz") into trimmed_reads
+  file "${name}_SummaryStatistics.txt" into seqyclean_report
 
   script:
   if(params.singleEnd){
@@ -60,39 +60,40 @@ process seqyclean {
 //Step2: Assemble trimmed reads with Shovill
 process shovill {
   tag "$name"
-  publishDir "${params.outdir}/assembled", mode: 'copy',saveAs: {filename -> filename == "contigs.fa" ? "${name}.contigs.fasta" : "$filename"}
-
-  //start with a lot of ram and scale down if we fail
-  memory { 36 - 4 * task.attempt }
-  ram = memory()
-  errorStrategy { ram > 0 ? 'retry' : 'terminate' }
+  publishDir "${params.outdir}/assembled", mode: 'copy'
 
   input:
   set val(name), file(reads) from trimmed_reads
 
   output:
-  file "${name}.contigs.fa" into assembled_genomes
+  tuple name, file("${name}.contigs.fa") into assembled_genomes
 
-  script:
-  """
-  shovill --cpus 0 --ram ${ram}  --outdir . --R1 ${reads[0]} --R2 ${reads[1]}
-  """
+  shell:
+  '''
+  ram=`awk '/MemTotal/ { printf "%.0f \\n", $2/1024/1024 - 1 }' /proc/meminfo`
+  shovill --cpus 0 --ram $ram  --outdir . --R1 !{reads[0]} --R2 !{reads[1]} --force
+  mv contigs.fa !{name}.contigs.fa
+  '''
 }
-/*
+
 //Step3a: Assembly Quality Report
 process quast {
-  tag "$prefix"
+  tag "$name"
   publishDir "${params.outdir}/quast",mode:'copy'
 
   input:
-  file(assembly) "${name}.contigs.fa" from assembled_genomes
+  set val(name), file(assembly) from assembled_genomes
 
   output:
-  file "${prefix}.report.txt" into quast_report
+  file "${name}.report.txt" into quast_report
 
-
+  script:
+  """
+  quast.py ${assembly} -o .
+  mv report.txt ${name}.report.txt
+  """
 }
-*/
+
 /*
 //Step3b: Annotate with prokka
 process prokka {
