@@ -62,6 +62,9 @@ process shovill {
   tag "$name"
   publishDir "${params.outdir}/assembled", mode: 'copy'
 
+  memory '8 GB'
+  ram=6
+
   input:
   set val(name), file(reads) from trimmed_reads
 
