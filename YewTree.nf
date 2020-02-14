@@ -33,26 +33,31 @@ process fastqc {
 }
 
 //Step1b: Trim with Seqyclean
-process seqyclean {
+process trimmomatic {
   tag "$name"
   publishDir "${params.outdir}/trimmed", mode: 'copy'
-
+  //trimming parameters
+  minlength=75
+  windowsize=4
+  qualitytrimscore=30
+  threads=4
+  
   input:
   set val(name), file(reads) from read_files_trimming
 
   output:
-  tuple name, file("${name}_{PE1,PE2}.fastq.gz") into trimmed_reads
+  tuple name, file("${name}_{P1,P2}.fastq.gz") into trimmed_reads
   file "${name}_SummaryStatistics.txt" into seqyclean_report
 
   script:
   if(params.singleEnd){
     """
-      seqyclean -minlen 25 -qual -c /Adapters_plus_PhiX_174.fasta -U ${reads} -gz -o ${name}
+
     """
   }
   else {
     """
-    seqyclean -minlen 25 -qual -c /Adapters_plus_PhiX_174.fasta -1 ${reads[0]} -2 ${reads[1]} -gz -o ${name}
+    java -jar /Trimmomatic-0.39/trimmomatic-0.39.jar PE -threads ${threads} ${reads} -baseout /output/${name}.fastq.gz SLIDINGWINDOW:${windowsize}:${qualitytrimscore} MINLEN:${minlength}
     """
   }
 }
