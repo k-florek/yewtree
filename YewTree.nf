@@ -32,35 +32,38 @@ process fastqc {
   """
 }
 
-//Step1b: Trim with Seqyclean
-process trimmomatic {
+//Step1b: Trim with Trimmomatic
+process trim {
   tag "$name"
   publishDir "${params.outdir}/trimmed", mode: 'copy'
+
+  input:
+  set val(name), file(reads) from read_files_trimming
+
+  output:
+  tuple name, file("${name}*{_1,_2}.fastq.gz") into trimmed_reads
+
+  script:
   //trimming parameters
   minlength=75
   windowsize=4
   qualitytrimscore=30
   threads=4
 
-  input:
-  set val(name), file(reads) from read_files_trimming
-
-  output:
-  tuple name, file("${name}*{P1,P2}.fastq.gz") into trimmed_reads
-
-  script:
+  //TODO need to setup output for single end stuff
   if(params.singleEnd){
     """
-
+    java -jar /Trimmomatic-0.39/trimmomatic-0.39.jar SE -threads ${threads} ${reads} -baseout ${name}.fastq.gz SLIDINGWINDOW:${windowsize}:${qualitytrimscore} MINLEN:${minlength}
     """
   }
   else {
     """
-    java -jar /Trimmomatic-0.39/trimmomatic-0.39.jar PE -threads ${threads} ${reads} -baseout /output/${name}.fastq.gz SLIDINGWINDOW:${windowsize}:${qualitytrimscore} MINLEN:${minlength}
+    java -jar /Trimmomatic-0.39/trimmomatic-0.39.jar PE -threads ${threads} ${reads} -baseout ${name}.fastq.gz SLIDINGWINDOW:${windowsize}:${qualitytrimscore} MINLEN:${minlength}
+    mv ${name}*1P.fastq.gz ${name}_1.fastq.gz
+    mv ${name}*2P.fastq.gz ${name}_2.fastq.gz
     """
   }
 }
-
 //Step2: Remove PhiX contamination
 process cleanreads {
   tag "$name"
@@ -70,14 +73,15 @@ process cleanreads {
   set val(name), file(reads) from trimmed_reads
 
   output:
-  tuple name, file("${name}*.fastq.gz") into cleaned_reads
+  tuple name, file("${name}{_1,_2}.clean.fastq.gz") into cleaned_reads
+  file("${name}.{phix,adapters}.stats.txt") into read_cleanning_stats
 
-  shell:
-  '''
-  ram=`awk '/MemTotal/ { printf "%.0f \\n", $2/1024/1024 - 1 }' /proc/meminfo`
-  shovill --cpus 0 --ram $ram  --outdir . --R1 !{reads[0]} --R2 !{reads[1]} --force
-  mv contigs.fa !{name}.contigs.fa
-  '''
+  script:
+  """
+  repair.sh in1=${reads[0]} in2=${reads[1]} out1=${name}.paired_1.fastq.gz out2=${name}.paired_2.fastq.gz
+  bbduk.sh in1=${name}.paired_1.fastq.gz in2=${name}.paired_2.fastq.gz out1=${name}.rmadpt_1.fastq.gz out2=${name}.rmadpt_2.fastq.gz ref=/bbmap/resources/adapters.fa stats=${name}.adapters.stats.txt ktrim=r k=23 mink=11 hdist=1 tpe tbo
+  bbduk.sh in1=${name}.rmadpt_1.fastq.gz in2=${name}.rmadpt_2.fastq.gz out1=${name}_1.clean.fastq.gz out2=${name}_2.clean.fastq.gz outm=${name}.matched_phix.fq ref=/bbmap/resources/phix174_ill.ref.fa.gz k=31 hdist=1 stats=${name}.phix.stats.txt
+  """
 }
 
 //Step3: Assemble trimmed reads with Shovill
@@ -89,7 +93,7 @@ process shovill {
   set val(name), file(reads) from cleaned_reads
 
   output:
-  tuple name, file("${name}.contigs.fa") into assembled_genomes
+  tuple name, file("${name}.contigs.fa") into assembled_genomes_quality, assembled_genomes_annotation
 
   shell:
   '''
@@ -105,7 +109,7 @@ process quast {
   publishDir "${params.outdir}/quast",mode:'copy'
 
   input:
-  set val(name), file(assembly) from assembled_genomes
+  set val(name), file(assembly) from assembled_genomes_quality
 
   output:
   file "${name}.report.txt" into quast_report
@@ -117,14 +121,14 @@ process quast {
   """
 }
 
-/*
+
 //Step4b: Annotate with prokka
 process prokka {
-  tag "$prefix"
+  tag "$name"
   publishDir "${params.outdir}/prokka",mode:'copy'
 
   input:
-  file(assembly) "${name}.contigs.fa" from assembled_genomes
+  set val(name), file(assembly) from assembled_genomes_annotation
 
   output:
   file "*.gff" into annotated_genomes
@@ -132,6 +136,24 @@ process prokka {
   script:
   """
   prokka --cpu 0 --compliant --mincontiglen 500 --outdir . ${assembly}
+  """
+}
+
+/*
+//Step5: Align with Roary
+process roary {
+  //tag "$name"
+  publishDir "${params.outdir}/roary",mode:'copy'
+
+  input:
+  file(annotatedGenomes) annotated_genomes.collect()
+
+  output:
+  file "*.gff" into annotated_genomes
+
+  script:
+  """
+
   """
 }
 */
