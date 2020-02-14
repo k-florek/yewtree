@@ -41,13 +41,12 @@ process trimmomatic {
   windowsize=4
   qualitytrimscore=30
   threads=4
-  
+
   input:
   set val(name), file(reads) from read_files_trimming
 
   output:
-  tuple name, file("${name}_{P1,P2}.fastq.gz") into trimmed_reads
-  file "${name}_SummaryStatistics.txt" into seqyclean_report
+  tuple name, file("${name}*{P1,P2}.fastq.gz") into trimmed_reads
 
   script:
   if(params.singleEnd){
@@ -62,13 +61,32 @@ process trimmomatic {
   }
 }
 
-//Step2: Assemble trimmed reads with Shovill
+//Step2: Remove PhiX contamination
+process cleanreads {
+  tag "$name"
+  publishDir "${params.outdir}/cleanedreads", mode: 'copy'
+
+  input:
+  set val(name), file(reads) from trimmed_reads
+
+  output:
+  tuple name, file("${name}*.fastq.gz") into cleaned_reads
+
+  shell:
+  '''
+  ram=`awk '/MemTotal/ { printf "%.0f \\n", $2/1024/1024 - 1 }' /proc/meminfo`
+  shovill --cpus 0 --ram $ram  --outdir . --R1 !{reads[0]} --R2 !{reads[1]} --force
+  mv contigs.fa !{name}.contigs.fa
+  '''
+}
+
+//Step3: Assemble trimmed reads with Shovill
 process shovill {
   tag "$name"
   publishDir "${params.outdir}/assembled", mode: 'copy'
 
   input:
-  set val(name), file(reads) from trimmed_reads
+  set val(name), file(reads) from cleaned_reads
 
   output:
   tuple name, file("${name}.contigs.fa") into assembled_genomes
@@ -81,7 +99,7 @@ process shovill {
   '''
 }
 
-//Step3a: Assembly Quality Report
+//Step4a: Assembly Quality Report
 process quast {
   tag "$name"
   publishDir "${params.outdir}/quast",mode:'copy'
@@ -100,7 +118,7 @@ process quast {
 }
 
 /*
-//Step3b: Annotate with prokka
+//Step4b: Annotate with prokka
 process prokka {
   tag "$prefix"
   publishDir "${params.outdir}/prokka",mode:'copy'
