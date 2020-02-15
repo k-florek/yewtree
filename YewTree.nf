@@ -5,7 +5,7 @@
 //eMail: kelsey.florek@slh.wisc.edu
 
 //starting parameters
-params.reads = "raw_reads/*R{1,2}*.fastq.gz"
+params.reads = "raw_reads/*{R1,R2,_1,_2}*.fastq.gz"
 params.singleEnd = false
 params.outdir = "results"
 
@@ -13,7 +13,30 @@ params.outdir = "results"
 Channel
     .fromFilePairs( params.reads, size: params.singleEnd ? 1 : 2 )
     .ifEmpty { exit 1, "Cannot find any reads matching: ${params.reads}\nNB: Path needs to be enclosed in quotes!\nIf this is single-end data, please specify --singleEnd on the command line." }
-    .into { read_files_fastqc; read_files_trimming }
+    .set { raw_reads }
+
+//Step0: Preprocess reads - change name to end at first underscore
+process preProcess {
+  input:
+  set val(oldName), file(reads) from raw_reads
+
+  output:
+  tuple name, file("${name}_{R1,R2}.fastq.gz") into read_files_fastqc, read_files_trimming
+
+  script:
+  name = oldName.split("_")[0]
+  if(params.singleEnd){
+  """
+  mv ${reads} ${name}.fastq.gz
+  """
+  }
+  else {
+  """
+  mv ${reads[0]} ${name}_R1.fastq.gz
+  mv ${reads[1]} ${name}_R2.fastq.gz
+  """
+  }
+}
 
 //Step1a: FastQC
 process fastqc {
@@ -105,19 +128,18 @@ process shovill {
 
 //Step4a: Assembly Quality Report
 process quast {
-  tag "$name"
   publishDir "${params.outdir}/quast",mode:'copy'
 
   input:
-  set val(name), file(assembly) from assembled_genomes_quality
+  file(assemblies) from assembled_genomes_quality.collect()
 
   output:
-  file "${name}.report.txt" into quast_report
+  file "assembly.report.txt" into quast_report
 
   script:
   """
-  quast.py ${assembly} -o .
-  mv report.txt ${name}.report.txt
+  quast.py ${assemblies} -o .
+  mv report.txt assembly.report.txt
   """
 }
 
@@ -125,38 +147,39 @@ process quast {
 //Step4b: Annotate with prokka
 process prokka {
   tag "$name"
-  publishDir "${params.outdir}/prokka",mode:'copy'
+  publishDir "${params.outdir}/annotated",mode:'copy'
 
   input:
   set val(name), file(assembly) from assembled_genomes_annotation
 
   output:
-  file "*.gff" into annotated_genomes
+  file "${name}.gff" into annotated_genomes
 
   script:
   """
-  prokka --cpu 0 --compliant --mincontiglen 500 --outdir . ${assembly}
+  prokka --cpu 0 --force --compliant --prefix ${name} --mincontiglen 500 --outdir . ${assembly}
   """
 }
 
-/*
 //Step5: Align with Roary
 process roary {
-  //tag "$name"
-  publishDir "${params.outdir}/roary",mode:'copy'
+  publishDir "${params.outdir}/core_alignment",mode:'copy'
 
   input:
-  file(annotatedGenomes) annotated_genomes.collect()
+  file(annotatedGenomes) from annotated_genomes.collect()
 
   output:
-  file "*.gff" into annotated_genomes
+  file "core_gene_alignment.aln" into core_aligned_genomes
+  file "roary_alignment_statistics.txt" into core_aligned_stats
 
-  script:
-  """
-
-  """
+  shell:
+  '''
+  cpus=`grep -c ^processor /proc/cpuinfo`
+  roary -e -p $cpus *.gff
+  mv summary_statistics.txt roary_alignment_statistics.txt
+  '''
 }
-*/
+
 /*
 process multiqc {
   tag "$prefix"
