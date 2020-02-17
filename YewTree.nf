@@ -7,7 +7,7 @@
 //starting parameters
 params.reads = "raw_reads/*{R1,R2,_1,_2}*.fastq.gz"
 params.singleEnd = false
-params.outdir = "results"
+params.outdir = "yewtree_results"
 
 //setup channel to read in and pair the fastq files
 Channel
@@ -67,21 +67,17 @@ process trim {
   tuple name, file("${name}*{_1,_2}.fastq.gz") into trimmed_reads
 
   script:
-  //trimming parameters
-  minlength=75
-  windowsize=4
-  qualitytrimscore=30
-  threads=4
-
   //TODO need to setup output for single end stuff
   if(params.singleEnd){
     """
-    java -jar /Trimmomatic-0.39/trimmomatic-0.39.jar SE -threads ${threads} ${reads} -baseout ${name}.fastq.gz SLIDINGWINDOW:${windowsize}:${qualitytrimscore} MINLEN:${minlength}
+    cpus=`grep -c ^processor /proc/cpuinfo`
+    java -jar /Trimmomatic-0.39/trimmomatic-0.39.jar SE -threads \$cpus ${reads} -baseout ${name}.fastq.gz SLIDINGWINDOW:${params.windowsize}:${params.qualitytrimscore} MINLEN:${params.minlength}
     """
   }
   else {
     """
-    java -jar /Trimmomatic-0.39/trimmomatic-0.39.jar PE -threads ${threads} ${reads} -baseout ${name}.fastq.gz SLIDINGWINDOW:${windowsize}:${qualitytrimscore} MINLEN:${minlength}
+    cpus=`grep -c ^processor /proc/cpuinfo`
+    java -jar /Trimmomatic-0.39/trimmomatic-0.39.jar PE -threads \$cpus ${reads} -baseout ${name}.fastq.gz SLIDINGWINDOW:${params.windowsize}:${params.qualitytrimscore} MINLEN:${params.minlength}
     mv ${name}*1P.fastq.gz ${name}_1.fastq.gz
     mv ${name}*2P.fastq.gz ${name}_2.fastq.gz
     """
@@ -170,16 +166,30 @@ process roary {
 
   output:
   file "core_gene_alignment.aln" into core_aligned_genomes
-  file "roary_alignment_statistics.txt" into core_aligned_stats
+  file "core_genome_statistics.txt" into core_aligned_stats
 
   shell:
   '''
   cpus=`grep -c ^processor /proc/cpuinfo`
   roary -e -p $cpus *.gff
-  mv summary_statistics.txt roary_alignment_statistics.txt
+  mv summary_statistics.txt core_genome_statistics.txt.txt
   '''
 }
 
+//Step6: IQTree for core-genome
+process cg_tree {
+  publishDir "${params.outdir}/core_genome_tree",mode:'copy'
+
+  input:
+  file(alignedGenomes) from core_aligned_genomes
+
+  output:
+
+  script:
+  """
+  iqtree -s snpma.fasta -m ${params.cg_tree_model} -bb 1000
+  """
+}
 /*
 process multiqc {
   tag "$prefix"
