@@ -65,19 +65,20 @@ process trim {
 
   output:
   tuple name, file("${name}*{_1,_2}.fastq.gz") into trimmed_reads
+  file("${name}.trim.stats.txt") into trimmed_reads_stats
 
   script:
   //TODO need to setup output for single end stuff
   if(params.singleEnd){
     """
     cpus=`grep -c ^processor /proc/cpuinfo`
-    java -jar /Trimmomatic-0.39/trimmomatic-0.39.jar SE -threads \$cpus ${reads} -baseout ${name}.fastq.gz SLIDINGWINDOW:${params.windowsize}:${params.qualitytrimscore} MINLEN:${params.minlength}
+    java -jar /Trimmomatic-0.39/trimmomatic-0.39.jar SE -threads \$cpus ${reads} -baseout ${name}.fastq.gz SLIDINGWINDOW:${params.windowsize}:${params.qualitytrimscore} MINLEN:${params.minlength} > ${name}.trim.stats.txt
     """
   }
   else {
     """
     cpus=`grep -c ^processor /proc/cpuinfo`
-    java -jar /Trimmomatic-0.39/trimmomatic-0.39.jar PE -threads \$cpus ${reads} -baseout ${name}.fastq.gz SLIDINGWINDOW:${params.windowsize}:${params.qualitytrimscore} MINLEN:${params.minlength}
+    java -jar /Trimmomatic-0.39/trimmomatic-0.39.jar PE -threads \$cpus ${reads} -baseout ${name}.fastq.gz SLIDINGWINDOW:${params.windowsize}:${params.qualitytrimscore} MINLEN:${params.minlength} > ${name}.trim.stats.txt
     mv ${name}*1P.fastq.gz ${name}_1.fastq.gz
     mv ${name}*2P.fastq.gz ${name}_2.fastq.gz
     """
@@ -160,20 +161,21 @@ process prokka {
 //Step5: Align with Roary
 process roary {
   publishDir "${params.outdir}/core_alignment",mode:'copy'
-
+  numGenomes = 0
   input:
-  file(annotatedGenomes) from annotated_genomes.collect()
+  file(genomes) from annotated_genomes.collect()
 
   output:
-  file "core_gene_alignment.aln" into core_aligned_genomes
+  tuple numGenomes, file("core_gene_alignment.aln") into core_aligned_genomes
   file "core_genome_statistics.txt" into core_aligned_stats
 
-  shell:
-  '''
+  script:
+  numGenomes = genomes.size()
+  """
   cpus=`grep -c ^processor /proc/cpuinfo`
-  roary -e -p $cpus *.gff
-  mv summary_statistics.txt core_genome_statistics.txt.txt
-  '''
+  roary -e -p \$cpus ${genomes}
+  mv summary_statistics.txt core_genome_statistics.txt
+  """
 }
 
 //Step6: IQTree for core-genome
@@ -181,16 +183,19 @@ process cg_tree {
   publishDir "${params.outdir}/core_genome_tree",mode:'copy'
 
   input:
-  file(alignedGenomes) from core_aligned_genomes
+  set val(numGenomes), file(alignedGenomes) from core_aligned_genomes
 
   output:
 
+  when:
+  numGenomes > 2
+
   script:
   """
-  iqtree -s snpma.fasta -m ${params.cg_tree_model} -bb 1000
+  iqtree -nt AUTO -s core_gene_alignment.aln -m ${params.cg_tree_model} -bb 1000
   """
 }
-/*
+
 process multiqc {
   tag "$prefix"
   publishDir "${params.outdir}/MultiQC", mode: 'copy'
@@ -199,21 +204,19 @@ process multiqc {
   input:
   //file multiqc_config
   file (fastqc:'fastqc/*') from fastqc_results.collect()
-  file ('trimmed/*') from seqyclean_report.collect()
-  file ('quast/*') from quast_report.collect()
+  file ('*.trim.stats.txt') from trimmed_reads_stats.collect()
+  file ('assembly.report.txt') from quast_report
+  file ('core_genome_statistics.txt') from core_aligned_stats
+  file ('*.stats.txt') from read_cleanning_stats.collect()
 
 
   output:
   file "*multiqc_report.html" into multiqc_report
   file "*_data"
-  val prefix into multiqc_prefix
 
   script:
   prefix = fastqc[0].toString() - '_fastqc.html' - 'fastqc/'
-  rtitle = custom_runName ? "--title \"$custom_runName\"" : ''
-  rfilename = custom_runName ? "--filename " + custom_runName.replaceAll('\\W','_').replaceAll('_+','_') + "_multiqc_report" : ''
   """
-  multiqc -f $rtitle $rfilename --config $multiqc_config . 2>&1
+  multiqc . 2>&1
   """
 }
-*/
