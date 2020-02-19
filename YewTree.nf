@@ -5,13 +5,13 @@
 //eMail: kelsey.florek@slh.wisc.edu
 
 //starting parameters
-params.reads = "raw_reads/*{R1,R2,_1,_2}*.fastq.gz"
+params.reads = ""
 params.singleEnd = false
 params.outdir = "yewtree_results"
 
 //setup channel to read in and pair the fastq files
 Channel
-    .fromFilePairs( params.reads, size: params.singleEnd ? 1 : 2 )
+    .fromFilePairs( "${params.reads}/*{R1,R2,_1,_2}*.fastq.gz", size: params.singleEnd ? 1 : 2 )
     .ifEmpty { exit 1, "Cannot find any reads matching: ${params.reads}\nNB: Path needs to be enclosed in quotes!\nIf this is single-end data, please specify --singleEnd on the command line." }
     .set { raw_reads }
 
@@ -106,6 +106,7 @@ process cleanreads {
 
 //Step3: Assemble trimmed reads with Shovill
 process shovill {
+  errorStrategy 'ignore'
   tag "$name"
   publishDir "${params.outdir}/assembled", mode: 'copy'
 
@@ -117,7 +118,7 @@ process shovill {
 
   shell:
   '''
-  ram=`awk '/MemTotal/ { printf "%.0f \\n", $2/1024/1024 - 1 }' /proc/meminfo`
+  ram=`awk '/MemAvailable/ { printf "%.0f \\n", $2/1024/1024 }' /proc/meminfo`
   shovill --cpus 0 --ram $ram  --outdir . --R1 !{reads[0]} --R2 !{reads[1]} --force
   mv contigs.fa !{name}.contigs.fa
   '''
@@ -125,6 +126,7 @@ process shovill {
 
 //Step4a: Assembly Quality Report
 process quast {
+  errorStrategy 'ignore'
   publishDir "${params.outdir}/quast",mode:'copy'
 
   input:
@@ -143,6 +145,7 @@ process quast {
 
 //Step4b: Annotate with prokka
 process prokka {
+  errorStrategy 'ignore'
   tag "$name"
   publishDir "${params.outdir}/annotated",mode:'copy'
 
