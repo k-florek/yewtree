@@ -174,9 +174,12 @@ process roary {
 
   script:
   numGenomes = genomes.size()
+  if(params.roary_mafft == true){
+    mafft="-n"
+  }else{mafft=""}
   """
   cpus=`grep -c ^processor /proc/cpuinfo`
-  roary -e -p \$cpus ${genomes}
+  roary -e ${mafft} -p \$cpus ${genomes}
   mv summary_statistics.txt core_genome_statistics.txt
   """
 }
